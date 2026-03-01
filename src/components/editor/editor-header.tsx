@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ModeToggle } from "@/components/mode-toggle";
 import { TEMPLATES } from "@/lib/templates";
+import { useIsMac } from "@/hooks/use-is-mac";
 
 interface EditorHeaderProps {
   onRun: () => void;
@@ -19,11 +20,15 @@ export function EditorHeader({
   currentTemplateId, 
   onTemplateChange 
 }: EditorHeaderProps) {
+  const isMac = useIsMac();
+
   const handleClear = () => {
     if (confirm("Are you sure you want to clear all data? This will reset the database.")) {
       onClear();
     }
   };
+
+  const shortcut = isMac ? "⌘↵" : "Ctrl+Enter";
 
   return (
     <header className="flex items-center justify-between px-6 py-3 border-b bg-card">
@@ -61,6 +66,9 @@ export function EditorHeader({
         <Button size="sm" onClick={onRun} className="gap-2">
           <Play className="w-4 h-4 fill-current" />
           Run SQL
+          <span className="text-[10px] bg-primary-foreground/20 px-1 rounded ml-1 opacity-70">
+            {shortcut}
+          </span>
         </Button>
       </div>
     </header>
