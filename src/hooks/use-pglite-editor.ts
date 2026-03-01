@@ -4,6 +4,8 @@ import { useEffect, useState, useCallback } from "react";
 import { PGlite } from "@electric-sql/pglite";
 import { toast } from "sonner";
 
+import { TEMPLATES } from "@/lib/templates";
+
 // Persistent instance outside the hook
 let dbInstance: PGlite | null = null;
 
@@ -20,12 +22,23 @@ export interface QueryResult {
   error?: string;
 }
 
+const STORAGE_KEY_TEMPLATE = "psql_editor_template";
+
 export function usePGliteEditor() {
   const [db, setDb] = useState<PGlite | null>(null);
   const [tables, setTables] = useState<TableMetadata[]>([]);
   const [tableContent, setTableContent] = useState<Record<string, any>>({});
   const [results, setResults] = useState<QueryResult[]>([]);
   const [isInitializing, setIsInitializing] = useState(true);
+  const [currentTemplateId, setCurrentTemplateId] = useState<string>(() => {
+    if (typeof window !== "undefined") {
+      const savedTemplate = localStorage.getItem(STORAGE_KEY_TEMPLATE);
+      if (savedTemplate && TEMPLATES.some(t => t.id === savedTemplate)) {
+        return savedTemplate;
+      }
+    }
+    return "ecommerce";
+  });
 
   const fetchTableMetadata = useCallback(async (pg: PGlite) => {
     try {
@@ -64,62 +77,21 @@ export function usePGliteEditor() {
     }
   }, []);
 
-  const seedDatabase = useCallback(async (pg: PGlite) => {
+  const seedDatabase = useCallback(async (pg: PGlite, templateId: string = "ecommerce") => {
     try {
+      const template = TEMPLATES.find(t => t.id === templateId);
+      if (!template || !template.sql) return;
+
+      // Check if tables already exist by checking if ANY table exists
       const res = await pg.query(`
-        SELECT EXISTS (
-            SELECT FROM information_schema.tables 
-            WHERE table_schema = 'public' AND table_name = 'customers'
-        );
-      `) as { rows: { exists: boolean }[] };
+        SELECT count(*) 
+        FROM information_schema.tables 
+        WHERE table_schema = 'public';
+      `) as { rows: { count: string }[] };
 
-      if (!res.rows[0].exists) {
-        await pg.exec(`
-          CREATE TABLE customers (
-              cid INT PRIMARY KEY,
-              fname VARCHAR(50),
-              lname VARCHAR(50),
-              age INT,
-              country VARCHAR(50)
-          );
-
-          INSERT INTO customers VALUES
-              (1, 'John', 'Doe', 31, 'USA'),
-              (2, 'Robert', 'Luna', 22, 'USA'),
-              (3, 'David', 'Robinson', 22, 'UK'),
-              (4, 'John', 'Reinhardt', 25, 'UK'),
-              (5, 'Betty', 'Doe', 28, 'UAE'),
-              (6, 'Alice', 'Walker', 30, 'Canada');
-
-          CREATE TABLE orders (
-              oid INT PRIMARY KEY,
-              itm VARCHAR(50),
-              amt INT,
-              cid INT,
-              FOREIGN KEY (cid) REFERENCES customers(cid)
-          );
-
-          INSERT INTO orders VALUES
-              (1, 'Keyboard', 400, 4),
-              (2, 'Mouse', 300, 4),
-              (3, 'Monitor', 12000, 3),
-              (4, 'Keyboard', 400, 1),
-              (5, 'Mousepad', 250, 2),
-              (6, 'Laptop', 45000, 1);
-
-          CREATE TABLE shippings (
-              sid INT PRIMARY KEY,
-              oid INT,
-              status VARCHAR(50),
-              FOREIGN KEY (oid) REFERENCES orders(oid)
-          );
-
-          INSERT INTO shippings VALUES
-              (1, 1, 'Pending'),
-              (2, 3, 'Delivered'),
-              (3, 4, 'Shipped');
-        `);
-        toast.success("Database seeded successfully");
+      if (parseInt(res.rows[0].count, 10) === 0) {
+        await pg.exec(template.sql);
+        toast.success(`Database seeded with ${template.name} template`);
       }
     } catch (err: any) {
       console.error("Error seeding database:", err);
@@ -135,12 +107,15 @@ export function usePGliteEditor() {
       
       await dbInstance.waitReady;
       setDb(dbInstance);
-      await seedDatabase(dbInstance);
+      // Try to get saved template from localStorage if you want persistence, 
+      // but for now we just use default or what's in the DB.
+      // If DB is empty, it will seed with default.
+      await seedDatabase(dbInstance, currentTemplateId);
       await fetchTableMetadata(dbInstance);
       setIsInitializing(false);
     }
     init();
-  }, [seedDatabase, fetchTableMetadata]);
+  }, [seedDatabase, fetchTableMetadata, currentTemplateId]);
 
   const runSQL = useCallback(async (sql: string) => {
     if (!db || !sql.trim()) return;
@@ -167,21 +142,33 @@ export function usePGliteEditor() {
     }
   }, [db, fetchTableMetadata]);
 
-  const resetDatabase = useCallback(async () => {
+  const setTemplate = useCallback(async (templateId: string) => {
     if (!db) return;
     try {
+      setCurrentTemplateId(templateId);
+      localStorage.setItem(STORAGE_KEY_TEMPLATE, templateId);
       await db.exec(`
         DROP SCHEMA public CASCADE;
         CREATE SCHEMA public;
       `);
       setResults([]);
-      await seedDatabase(db);
+      const template = TEMPLATES.find(t => t.id === templateId);
+      if (template && template.sql) {
+        await db.exec(template.sql);
+        toast.success(`Switched to ${template.name} template`);
+      } else {
+        toast.success("Database cleared");
+      }
       await fetchTableMetadata(db);
-      toast.success("Database reset successful");
     } catch (err: any) {
-      toast.error("Reset failed: " + err.message);
+      toast.error("Failed to switch template: " + err.message);
     }
-  }, [db, seedDatabase, fetchTableMetadata]);
+  }, [db, fetchTableMetadata]);
+
+  const resetDatabase = useCallback(async () => {
+    if (!db) return;
+    await setTemplate(currentTemplateId);
+  }, [db, setTemplate, currentTemplateId]);
 
   const validateSQL = useCallback(async (sql: string) => {
     if (!db || !sql.trim()) return null;
@@ -234,6 +221,8 @@ ROLLBACK;`);
     runSQL,
     resetDatabase,
     validateSQL,
-    setResults
+    setResults,
+    setTemplate,
+    currentTemplateId
   };
 }

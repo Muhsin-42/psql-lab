@@ -23,7 +23,9 @@ export default function Home() {
     results,
     runSQL,
     resetDatabase,
-    validateSQL
+    validateSQL,
+    setTemplate,
+    currentTemplateId
   } = usePGliteEditor();
 
   const [editorValue, setEditorValue] = useState(DEFAULT_QUERY);
@@ -50,6 +52,21 @@ export default function Home() {
   const handleRunSQL = useCallback(() => {
     runSQL(editorValue);
   }, [runSQL, editorValue]);
+
+  const handleTemplateChange = (templateId: string) => {
+    setTemplate(templateId);
+    
+    // Set a default query for the selected template
+    let defaultQ = "";
+    switch(templateId) {
+      case "ecommerce": defaultQ = "SELECT * FROM customers;"; break;
+      case "school": defaultQ = "SELECT * FROM students;"; break;
+      case "employee": defaultQ = "SELECT * FROM employees;"; break;
+      case "social": defaultQ = "SELECT * FROM users;"; break;
+      default: defaultQ = "-- Write your SQL here\n";
+    }
+    setEditorValue(defaultQ);
+  };
 
   const toggleLeftSidebar = () => {
     if (leftPanelRef.current) {
@@ -78,6 +95,8 @@ export default function Home() {
       <EditorHeader
         onRun={handleRunSQL}
         onClear={resetDatabase}
+        currentTemplateId={currentTemplateId}
+        onTemplateChange={handleTemplateChange}
       />
 
       <main className="flex-1 overflow-hidden">
