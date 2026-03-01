@@ -42,6 +42,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { Separator } from "@/components/ui/separator";
+import { ModeToggle } from "@/components/mode-toggle";
 
 // Initialize PGlite instance outside of the component to persist across re-renders
 let dbInstance: PGlite | null = null;
@@ -337,6 +338,7 @@ export default function Home() {
         </div>
         
         <div className="flex items-center gap-3">
+          <ModeToggle />
           <Button variant="outline" size="sm" onClick={handleClearAll} className="gap-2">
             <Trash2 className="w-4 h-4" />
             Clear All
