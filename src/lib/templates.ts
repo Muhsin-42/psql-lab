@@ -3,6 +3,7 @@ export interface Template {
   name: string;
   description: string;
   sql: string;
+  defaultQuery: string;
 }
 
 export const TEMPLATES: Template[] = [
@@ -11,6 +12,7 @@ export const TEMPLATES: Template[] = [
     name: "Empty",
     description: "A clean slate with no tables.",
     sql: "",
+    defaultQuery: "-- Write your SQL here\n",
   },
   {
     id: "ecommerce",
@@ -61,6 +63,7 @@ INSERT INTO shippings VALUES
     (2, 3, 'Delivered'),
     (3, 4, 'Shipped');
 `,
+    defaultQuery: "SELECT * FROM customers;",
   },
   {
     id: "school",
@@ -111,6 +114,7 @@ INSERT INTO enrollments VALUES
     (5, 4, 104, 'B'),
     (6, 5, 101, 'A');
 `,
+    defaultQuery: "SELECT * FROM students;",
   },
   {
     id: "employee",
@@ -144,6 +148,7 @@ INSERT INTO employees VALUES
     (4, 'Jessica Pearson', 3, 110000, '2015-11-05'),
     (5, 'Louis Litt', 4, 90000, '2018-08-14');
 `,
+    defaultQuery: "SELECT * FROM employees;",
   },
   {
     id: "social",
@@ -188,5 +193,7 @@ INSERT INTO comments VALUES
     (2, 2, 1, 'Agreed!'),
     (3, 3, 3, 'I will be there!');
 `,
+    defaultQuery: "SELECT * FROM users;",
   },
 ];
+

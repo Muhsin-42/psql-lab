@@ -37,7 +37,7 @@ export function usePGliteEditor() {
         return savedTemplate;
       }
     }
-    return "ecommerce";
+    return TEMPLATES[1]?.id || "ecommerce";
   });
 
   const fetchTableMetadata = useCallback(async (pg: PGlite) => {
@@ -77,7 +77,7 @@ export function usePGliteEditor() {
     }
   }, []);
 
-  const seedDatabase = useCallback(async (pg: PGlite, templateId: string = "ecommerce") => {
+  const seedDatabase = useCallback(async (pg: PGlite, templateId: string = TEMPLATES[0]?.id || "ecommerce") => {
     try {
       const template = TEMPLATES.find(t => t.id === templateId);
       if (!template || !template.sql) return;

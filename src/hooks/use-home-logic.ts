@@ -3,8 +3,10 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { usePGliteEditor } from "@/hooks/use-pglite-editor";
 
+import { TEMPLATES } from "@/lib/templates";
+
 const STORAGE_KEY_EDITOR = "psql_editor_content";
-const DEFAULT_QUERY = "SELECT * FROM customers;";
+const DEFAULT_QUERY = TEMPLATES.find(t => t.id === "ecommerce")?.defaultQuery || "SELECT * FROM customers;";
 
 export function useHomeLogic() {
   const {
@@ -57,15 +59,10 @@ export function useHomeLogic() {
   const handleTemplateChange = (templateId: string) => {
     setTemplate(templateId);
     
-    let defaultQ = "";
-    switch(templateId) {
-      case "ecommerce": defaultQ = "SELECT * FROM customers;"; break;
-      case "school": defaultQ = "SELECT * FROM students;"; break;
-      case "employee": defaultQ = "SELECT * FROM employees;"; break;
-      case "social": defaultQ = "SELECT * FROM users;"; break;
-      default: defaultQ = "-- Write your SQL here\n";
+    const template = TEMPLATES.find(t => t.id === templateId);
+    if (template) {
+      setEditorValue(template.defaultQuery);
     }
-    setEditorValue(defaultQ);
   };
 
   const toggleLeftSidebar = () => {
