@@ -1,8 +1,15 @@
 "use client";
 
-import { useCallback, useRef } from "react";
+import { useEffect, useRef } from "react";
 import { ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import Editor, { OnMount, loader } from "@monaco-editor/react";
+import { useTheme } from "next-themes";
+import type { TableMetadata } from "@/hooks/use-pglite-editor";
+import type * as monaco from "monaco-editor";
+
+// Pre-load monaco to avoid flickering
+loader.config({ paths: { vs: "https://cdn.jsdelivr.net/npm/monaco-editor@0.43.0/min/vs" } });
 
 interface SQLEditorProps {
   value: string;
@@ -10,74 +17,142 @@ interface SQLEditorProps {
   onRun: () => void;
   showToggle: boolean;
   onToggle: () => void;
+  tables?: TableMetadata[];
+  validateSQL?: (sql: string) => Promise<string | null>;
 }
 
-export function SQLEditor({ value, onChange, onRun, showToggle, onToggle }: SQLEditorProps) {
-  const editorRef = useRef<HTMLTextAreaElement>(null);
+export function SQLEditor({ 
+  value, 
+  onChange, 
+  onRun, 
+  showToggle, 
+  onToggle,
+  tables = [],
+  validateSQL
+}: SQLEditorProps) {
+  const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
+  const monacoRef = useRef<typeof monaco | null>(null);
+  const { theme } = useTheme();
 
-  const toggleComment = useCallback(() => {
-    if (!editorRef.current) return;
-    const target = editorRef.current;
-    const start = target.selectionStart;
-    const end = target.selectionEnd;
-    const val = target.value;
+  // Debounced linting
+  useEffect(() => {
+    if (!validateSQL || !editorRef.current || !monacoRef.current) return;
 
-    const startOfLine = val.lastIndexOf("\n", start - 1) + 1;
-    const endOfLine = val.indexOf("\n", end);
-    const actualEnd = endOfLine === -1 ? val.length : endOfLine;
-
-    const selectionText = val.substring(startOfLine, actualEnd);
-    const lines = selectionText.split("\n");
-
-    const allCommented = lines.every(
-      (line) => line.trim().startsWith("--") || line.trim() === "",
-    );
-
-    let newLines;
-    if (allCommented) {
-      newLines = lines.map((line) => line.replace(/(--\s?)/, ""));
-    } else {
-      newLines = lines.map((line) => `-- ${line}`);
-    }
-
-    const newJoinedLines = newLines.join("\n");
-    const newValue = 
-      val.substring(0, startOfLine) +
-      newJoinedLines +
-      val.substring(actualEnd);
-
-    onChange(newValue);
-
-    setTimeout(() => {
-      target.selectionStart = startOfLine;
-      target.selectionEnd = startOfLine + newJoinedLines.length;
-    }, 0);
-  }, [onChange]);
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Tab") {
-      e.preventDefault();
-      const target = e.target as HTMLTextAreaElement;
-      const start = target.selectionStart;
-      const end = target.selectionEnd;
+    const timer = setTimeout(async () => {
+      if (!editorRef.current || !monacoRef.current) return;
+      const error = await validateSQL(value);
+      const model = editorRef.current.getModel();
+      if (!model) return;
       
-      const newValue = value.substring(0, start) + "  " + value.substring(end);
-      onChange(newValue);
-      
-      setTimeout(() => {
-        target.selectionStart = target.selectionEnd = start + 2;
-      }, 0);
-    }
+      if (error) {
+        // Simple error parsing to find line/column if possible
+        // Postgres errors often look like "syntax error at or near \"foo\" at character 15"
+        let line = 1;
+        let column = 1;
+        const charMatch = error.match(/at character (\d+)/);
+        if (charMatch) {
+          const charPos = parseInt(charMatch[1], 10);
+          const textBefore = value.substring(0, charPos);
+          const linesBefore = textBefore.split("\n");
+          line = linesBefore.length;
+          column = linesBefore[linesBefore.length - 1].length + 1;
+        }
 
-    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
-      e.preventDefault();
+        monacoRef.current.editor.setModelMarkers(model, "sql", [
+          {
+            startLineNumber: line,
+            startColumn: column,
+            endLineNumber: line,
+            endColumn: column + 5, // highlight a few chars
+            message: error,
+            severity: monacoRef.current.MarkerSeverity.Error,
+          },
+        ]);
+      } else {
+        monacoRef.current.editor.setModelMarkers(model, "sql", []);
+      }
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [value, validateSQL]);
+
+  const handleEditorDidMount: OnMount = (editor, monaco) => {
+    editorRef.current = editor;
+    monacoRef.current = monaco;
+
+    // Register completion provider for SQL
+    const completionProvider = monaco.languages.registerCompletionItemProvider("sql", {
+      triggerCharacters: ["."],
+      provideCompletionItems: (model: monaco.editor.ITextModel, position: monaco.Position) => {
+        const word = model.getWordUntilPosition(position);
+        const range = {
+          startLineNumber: position.lineNumber,
+          endLineNumber: position.lineNumber,
+          startColumn: word.startColumn,
+          endColumn: word.endColumn,
+        };
+
+        const suggestions: monaco.languages.CompletionItem[] = [];
+
+        // Add table names
+        tables.forEach((table) => {
+          suggestions.push({
+            label: table.name,
+            kind: monaco.languages.CompletionItemKind.Class,
+            insertText: table.name,
+            range: range,
+            detail: "Table",
+          });
+
+          // Add column names
+          table.columns.forEach((col) => {
+            suggestions.push({
+              label: col.column_name,
+              kind: monaco.languages.CompletionItemKind.Field,
+              insertText: col.column_name,
+              range: range,
+              detail: `${table.name} column (${col.data_type})`,
+            });
+          });
+        });
+
+        // Add some common SQL keywords if not already there
+        const keywords = [
+          "SELECT", "FROM", "WHERE", "INSERT", "UPDATE", "DELETE", 
+          "CREATE", "DROP", "ALTER", "TABLE", "INTO", "VALUES",
+          "JOIN", "LEFT", "RIGHT", "INNER", "OUTER", "ON",
+          "GROUP", "BY", "ORDER", "HAVING", "LIMIT", "OFFSET",
+          "AND", "OR", "NOT", "NULL", "IS", "IN", "EXISTS",
+          "BETWEEN", "LIKE", "AS", "DISTINCT", "COUNT", "SUM",
+          "AVG", "MIN", "MAX", "CASE", "WHEN", "THEN", "ELSE", "END"
+        ];
+
+        keywords.forEach(kw => {
+          suggestions.push({
+            label: kw,
+            kind: monaco.languages.CompletionItemKind.Keyword,
+            insertText: kw,
+            range: range,
+          });
+        });
+
+        return { suggestions };
+      },
+    });
+
+    // Add command for Run SQL (Ctrl/Cmd + Enter)
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
       onRun();
-    }
+    });
 
-    if ((e.ctrlKey || e.metaKey) && e.key === "/") {
-      e.preventDefault();
-      toggleComment();
-    }
+    // Clean up
+    return () => {
+      completionProvider.dispose();
+    };
+  };
+
+  const handleEditorChange = (value: string | undefined) => {
+    onChange(value || "");
   };
 
   return (
@@ -92,15 +167,26 @@ export function SQLEditor({ value, onChange, onRun, showToggle, onToggle }: SQLE
           <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Input</span>
         </div>
       </div>
-      <div className="flex-1 relative font-mono text-sm">
-        <textarea
-          ref={editorRef}
+      <div className="flex-1 relative overflow-hidden">
+        <Editor
+          height="100%"
+          defaultLanguage="sql"
+          theme={theme === "dark" ? "vs-dark" : "light"}
           value={value}
-          onChange={(e) => onChange(e.target.value)}
-          onKeyDown={handleKeyDown}
-          className="absolute inset-0 w-full h-full p-4 bg-transparent outline-none resize-none leading-relaxed selection:bg-primary/20"
-          placeholder="SELECT * FROM customers..."
-          spellCheck={false}
+          onChange={handleEditorChange}
+          onMount={handleEditorDidMount}
+          options={{
+            minimap: { enabled: false },
+            fontSize: 14,
+            fontFamily: "var(--font-geist-mono)",
+            lineNumbers: "on",
+            roundedSelection: false,
+            scrollBeyondLastLine: false,
+            readOnly: false,
+            automaticLayout: true,
+            padding: { top: 16, bottom: 16 },
+            wordWrap: "on",
+          }}
         />
       </div>
     </div>

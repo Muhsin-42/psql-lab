@@ -22,7 +22,8 @@ export default function Home() {
     tableContent,
     results,
     runSQL,
-    resetDatabase
+    resetDatabase,
+    validateSQL
   } = usePGliteEditor();
 
   const [editorValue, setEditorValue] = useState(DEFAULT_QUERY);
@@ -82,7 +83,7 @@ export default function Home() {
       <main className="flex-1 overflow-hidden">
         <ResizablePanelGroup orientation="horizontal">
           <ResizablePanel
-            // @ts-ignore
+            // @ts-expect-error - ref type mismatch with ImperativePanelHandle
             ref={leftPanelRef}
             defaultSize={20}
             minSize={0}
@@ -107,6 +108,8 @@ export default function Home() {
                   onRun={handleRunSQL}
                   showToggle={leftSidebarCollapsed}
                   onToggle={toggleLeftSidebar}
+                  tables={tables}
+                  validateSQL={validateSQL}
                 />
               </ResizablePanel>
 
@@ -121,7 +124,7 @@ export default function Home() {
           <ResizableHandle withHandle />
 
           <ResizablePanel
-            // @ts-ignore
+            // @ts-expect-error - ref type mismatch with ImperativePanelHandle
             ref={rightPanelRef}
             defaultSize={30}
             minSize={0}

@@ -183,6 +183,48 @@ export function usePGliteEditor() {
     }
   }, [db, seedDatabase, fetchTableMetadata]);
 
+  const validateSQL = useCallback(async (sql: string) => {
+    if (!db || !sql.trim()) return null;
+    let prefixLength = 0;
+    try {
+      const hasMultipleStatements = sql.includes(";") && 
+        sql.trim().indexOf(";") < sql.trim().length - 1;
+      const isExplainable = /^\s*(SELECT|INSERT|UPDATE|DELETE|WITH|VALUES)/i.test(sql);
+
+      if (!hasMultipleStatements && isExplainable) {
+        prefixLength = 8; // "EXPLAIN "
+        await db.query(`EXPLAIN ${sql}`);
+        return null;
+      }
+
+      const hasTransactionControl = /\b(COMMIT|ROLLBACK|BEGIN|SAVEPOINT|RELEASE)\b/i.test(sql);
+      
+      if (!hasTransactionControl) {
+        prefixLength = 7; // "BEGIN;\n"
+        await db.exec(`BEGIN;
+${sql}${sql.endsWith(";") ? "" : ";"}
+ROLLBACK;`);
+      } else {
+        const firstStatement = sql.split(";")[0];
+        if (isExplainable) {
+          prefixLength = 8; // "EXPLAIN "
+          await db.query(`EXPLAIN ${firstStatement}`);
+        }
+      }
+      return null;
+    } catch (err: any) {
+      let message = err.message;
+      const charMatch = message.match(/at character (\d+)/);
+      if (charMatch && prefixLength > 0) {
+        const charPos = parseInt(charMatch[1], 10);
+        if (charPos > prefixLength) {
+          message = message.replace(`at character ${charPos}`, `at character ${charPos - prefixLength}`);
+        }
+      }
+      return message;
+    }
+  }, [db]);
+
   return {
     db,
     tables,
@@ -191,6 +233,7 @@ export function usePGliteEditor() {
     isInitializing,
     runSQL,
     resetDatabase,
+    validateSQL,
     setResults
   };
 }
