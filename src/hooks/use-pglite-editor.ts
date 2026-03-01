@@ -166,6 +166,53 @@ export function usePGliteEditor() {
 
   const validateSQL = useCallback(async (sql: string) => {
     if (!db || !sql.trim()) return null;
+
+    // Fast pre-flight checks for unbalanced characters
+    let inSingleQuote = false;
+    let inDoubleQuote = false;
+    let openParens = 0;
+    
+    for (let i = 0; i < sql.length; i++) {
+      const char = sql[i];
+      const nextChar = sql[i + 1];
+      
+      if (char === "'" && inSingleQuote && nextChar === "'") {
+        i++; // Skip escaped quote
+        continue;
+      }
+      
+      if (char === "'" && !inDoubleQuote) {
+        inSingleQuote = !inSingleQuote;
+      } else if (char === '"' && !inSingleQuote) {
+        inDoubleQuote = !inDoubleQuote;
+      } else if (char === '(' && !inSingleQuote && !inDoubleQuote) {
+        openParens++;
+      } else if (char === ')' && !inSingleQuote && !inDoubleQuote) {
+        openParens--;
+      }
+      
+      // Ignore inline comments
+      if (char === '-' && nextChar === '-' && !inSingleQuote && !inDoubleQuote) {
+        while (i < sql.length && sql[i] !== '\n') {
+          i++;
+        }
+      }
+      
+      // Ignore block comments /* ... */
+      if (char === '/' && nextChar === '*' && !inSingleQuote && !inDoubleQuote) {
+        i += 2; // Skip /*
+        while (i < sql.length - 1 && !(sql[i] === '*' && sql[i+1] === '/')) {
+          i++;
+        }
+        i++; // Skip closing /
+      }
+    }
+
+    if (inSingleQuote) return "syntax error: unterminated quoted string at or near \"'\"";
+    if (inDoubleQuote) return "syntax error: unterminated quoted identifier at or near \"\"\"";
+    if (openParens > 0) return "syntax error: unbalanced parentheses, missing ')'";
+    if (openParens < 0) return "syntax error: unbalanced parentheses, unexpected ')'";
+
     let prefixLength = 0;
     try {
       const hasMultipleStatements = sql.includes(";") && 
@@ -204,11 +251,20 @@ ROLLBACK;`);
         // but for now just clear the state.
       }
 
-      const charMatch = message.match(/at character (\d+)/);
-      if (charMatch && prefixLength > 0) {
-        const charPos = parseInt(charMatch[1], 10);
-        if (charPos > prefixLength) {
-          message = message.replace(`at character ${charPos}`, `at character ${charPos - prefixLength}`);
+      let pos = err.position ? parseInt(err.position, 10) : null;
+      if (!pos) {
+        const charMatch = message.match(/at character (\d+)/);
+        if (charMatch) {
+          pos = parseInt(charMatch[1], 10);
+        }
+      }
+
+      if (pos !== null) {
+        const adjustedPos = pos > prefixLength ? pos - prefixLength : pos;
+        if (message.includes("at character")) {
+          message = message.replace(/at character \d+/, `at character ${adjustedPos}`);
+        } else {
+          message = `${message} at character ${adjustedPos}`;
         }
       }
       return message;

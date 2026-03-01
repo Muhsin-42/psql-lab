@@ -33,13 +33,25 @@ export function useSQLEditor({ value, onRun, tables, validateSQL }: UseSQLEditor
       if (error) {
         let line = 1;
         let column = 1;
+        let endColumn = column + 5;
         const charMatch = error.match(/at character (\d+)/);
+        
         if (charMatch) {
-          const charPos = parseInt(charMatch[1], 10);
+          // PostgreSQL character offset is 1-based, use 0-based for JS substring
+          const charPos = parseInt(charMatch[1], 10) - 1;
           const textBefore = value.substring(0, charPos);
-          const linesBefore = textBefore.split("");
+          const linesBefore = textBefore.split("\n");
+          
           line = linesBefore.length;
           column = linesBefore[linesBefore.length - 1].length + 1;
+          
+          // Dynamically find the word at the error position to highlight it
+          const wordInfo = model.getWordAtPosition({ lineNumber: line, column });
+          if (wordInfo) {
+            endColumn = wordInfo.endColumn;
+          } else {
+            endColumn = column + 5;
+          }
         }
 
         monacoRef.current.editor.setModelMarkers(model, "sql", [
@@ -47,7 +59,7 @@ export function useSQLEditor({ value, onRun, tables, validateSQL }: UseSQLEditor
             startLineNumber: line,
             startColumn: column,
             endLineNumber: line,
-            endColumn: column + 5,
+            endColumn: endColumn,
             message: error,
             severity: monacoRef.current.MarkerSeverity.Error,
           },
