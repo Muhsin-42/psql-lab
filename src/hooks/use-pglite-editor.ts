@@ -5,9 +5,7 @@ import { PGlite } from "@electric-sql/pglite";
 import { toast } from "sonner";
 
 import { TEMPLATES } from "@/lib/templates";
-
-// Persistent instance outside the hook
-let dbInstance: PGlite | null = null;
+import { usePGlite } from "@/components/editor/pglite-provider";
 
 export interface TableMetadata {
   name: string;
@@ -25,11 +23,11 @@ export interface QueryResult {
 const STORAGE_KEY_TEMPLATE = "psql_editor_template";
 
 export function usePGliteEditor() {
-  const [db, setDb] = useState<PGlite | null>(null);
+  const { db, isInitializing: isDbInitializing } = usePGlite();
   const [tables, setTables] = useState<TableMetadata[]>([]);
   const [tableContent, setTableContent] = useState<Record<string, any>>({});
   const [results, setResults] = useState<QueryResult[]>([]);
-  const [isInitializing, setIsInitializing] = useState(true);
+  const [isSeeding, setIsSeeding] = useState(false);
   const [currentTemplateId, setCurrentTemplateId] = useState<string>(() => {
     if (typeof window !== "undefined") {
       const savedTemplate = localStorage.getItem(STORAGE_KEY_TEMPLATE);
@@ -37,7 +35,7 @@ export function usePGliteEditor() {
         return savedTemplate;
       }
     }
-    return TEMPLATES[1]?.id || "ecommerce";
+    return TEMPLATES[0]?.id || "ecommerce";
   });
 
   const fetchTableMetadata = useCallback(async (pg: PGlite) => {
@@ -77,12 +75,13 @@ export function usePGliteEditor() {
     }
   }, []);
 
-  const seedDatabase = useCallback(async (pg: PGlite, templateId: string = TEMPLATES[0]?.id || "ecommerce") => {
+  const seedDatabase = useCallback(async (pg: PGlite, templateId: string) => {
     try {
+      setIsSeeding(true);
       const template = TEMPLATES.find(t => t.id === templateId);
       if (!template || !template.sql) return;
 
-      // Check if tables already exist by checking if ANY table exists
+      // Check if tables already exist
       const res = await pg.query(`
         SELECT count(*) 
         FROM information_schema.tables 
@@ -93,29 +92,21 @@ export function usePGliteEditor() {
         await pg.exec(template.sql);
         toast.success(`Database seeded with ${template.name} template`);
       }
+      await fetchTableMetadata(pg);
     } catch (err: any) {
       console.error("Error seeding database:", err);
       toast.error("Failed to seed database: " + err.message);
+    } finally {
+      setIsSeeding(false);
     }
-  }, []);
+  }, [fetchTableMetadata]);
 
+  // Handle initial seed once db is ready
   useEffect(() => {
-    async function init() {
-      if (!dbInstance) {
-        dbInstance = new PGlite("idb://psql_editor_db");
-      }
-      
-      await dbInstance.waitReady;
-      setDb(dbInstance);
-      // Try to get saved template from localStorage if you want persistence, 
-      // but for now we just use default or what's in the DB.
-      // If DB is empty, it will seed with default.
-      await seedDatabase(dbInstance, currentTemplateId);
-      await fetchTableMetadata(dbInstance);
-      setIsInitializing(false);
+    if (db && !isDbInitializing) {
+      seedDatabase(db, currentTemplateId);
     }
-    init();
-  }, [seedDatabase, fetchTableMetadata, currentTemplateId]);
+  }, [db, isDbInitializing, seedDatabase, currentTemplateId]);
 
   const runSQL = useCallback(async (sql: string) => {
     if (!db || !sql.trim()) return;
@@ -147,10 +138,13 @@ export function usePGliteEditor() {
     try {
       setCurrentTemplateId(templateId);
       localStorage.setItem(STORAGE_KEY_TEMPLATE, templateId);
+      
+      // Clean start for switching templates
       await db.exec(`
         DROP SCHEMA public CASCADE;
         CREATE SCHEMA public;
       `);
+      
       setResults([]);
       const template = TEMPLATES.find(t => t.id === templateId);
       if (template && template.sql) {
@@ -201,6 +195,15 @@ ROLLBACK;`);
       return null;
     } catch (err: any) {
       let message = err.message;
+      
+      // Critical fix for "Transaction Aborted" state:
+      // If a transaction fails in Postgres, we MUST rollback or we can't run anything else.
+      if (message.includes("current transaction is aborted")) {
+        await db.exec("ROLLBACK;");
+        // Re-run the validation to get the ACTUAL error message if possible
+        // but for now just clear the state.
+      }
+
       const charMatch = message.match(/at character (\d+)/);
       if (charMatch && prefixLength > 0) {
         const charPos = parseInt(charMatch[1], 10);
@@ -217,7 +220,7 @@ ROLLBACK;`);
     tables,
     tableContent,
     results,
-    isInitializing,
+    isInitializing: isDbInitializing || isSeeding,
     runSQL,
     resetDatabase,
     validateSQL,

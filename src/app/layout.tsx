@@ -20,6 +20,8 @@ export const metadata: Metadata = {
   description: "Modern psql-editor using Next.js and PGlite",
 };
 
+import { PGliteProvider } from "@/components/editor/pglite-provider";
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -36,10 +38,12 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
-          <TooltipProvider>
-            {children}
-            <Toaster />
-          </TooltipProvider>
+          <PGliteProvider>
+            <TooltipProvider>
+              {children}
+              <Toaster />
+            </TooltipProvider>
+          </PGliteProvider>
         </ThemeProvider>
       </body>
     </html>
