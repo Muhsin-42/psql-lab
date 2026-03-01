@@ -1,5 +1,6 @@
 "use client";
 
+import * as React from "react";
 import { ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Editor, { loader } from "@monaco-editor/react";
@@ -28,7 +29,13 @@ export function SQLEditor({
   tables = [],
   validateSQL
 }: SQLEditorProps) {
-  const { theme } = useTheme();
+  const { resolvedTheme } = useTheme();
+  const [mounted, setMounted] = React.useState(false);
+  
+  React.useEffect(() => {
+    setMounted(true);
+  }, []);
+
   const { handleEditorDidMount } = useSQLEditor({ 
     value, 
     onRun, 
@@ -39,6 +46,24 @@ export function SQLEditor({
   const handleEditorChange = (val: string | undefined) => {
     onChange(val || "");
   };
+
+  if (!mounted) {
+    return (
+      <div className="flex flex-col h-full bg-muted/20">
+        <div className="flex items-center justify-between px-4 py-2 border-b bg-card">
+          <div className="flex items-center gap-2">
+            {showToggle && (
+              <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground" onClick={onToggle}>
+                <ChevronRight className="w-4 h-4" />
+              </Button>
+            )}
+            <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Input</span>
+          </div>
+        </div>
+        <div className="flex-1 bg-[#1e1e1e]" />
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-full bg-muted/20">
@@ -56,7 +81,7 @@ export function SQLEditor({
         <Editor
           height="100%"
           defaultLanguage="sql"
-          theme={theme === "dark" ? "vs-dark" : "light"}
+          theme={resolvedTheme === "dark" ? "vs-dark" : "light"}
           value={value}
           onChange={handleEditorChange}
           onMount={handleEditorDidMount}
